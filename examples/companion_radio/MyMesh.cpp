@@ -2,6 +2,7 @@
 
 #include <Arduino.h> // needed for PlatformIO
 #include <Mesh.h>
+#include <helpers/TimeSanity.h>
 
 #define CMD_APP_START                 1
 #define CMD_SEND_TXT_MSG              2
@@ -1241,7 +1242,12 @@ void MyMesh::handleCmdFrame(size_t len) {
     uint32_t secs;
     memcpy(&secs, &cmd_frame[1], 4);
     uint32_t curr = getRTCClock()->getCurrentTime();
-    if (secs >= curr) {
+    // forward set -- or backward, as recovery when the current clock is
+    // implausible (e.g. after a clock excursion the phone could otherwise
+    // never correct); never accept an implausibly-far-ahead time
+    if (!time_sanity::plausible(secs)) {
+      writeErrFrame(ERR_CODE_ILLEGAL_ARG);
+    } else if (secs >= curr || !time_sanity::plausible(curr)) {
       getRTCClock()->setCurrentTime(secs);
       writeOKFrame();
     } else {

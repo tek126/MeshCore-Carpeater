@@ -551,8 +551,4 @@ private:
     // These are statically allocated at compile time (.bss section) to avoid
     // malloc failures when heap is fragmented during message processing.
     // Total allocation: 10,412 bytes (8364 + 2048) reserved before program runs
-#if defined(NRF52_PLATFORM)
-    static tinfl_decompressor _decompressorStatic;  // Decompressor context (~8.3KB)
-    static uint8_t _decompBufferStatic[BITCHAT_MAX_PAYLOAD_SIZE];  // Decompression buffer (2KB)
-#endif
 };

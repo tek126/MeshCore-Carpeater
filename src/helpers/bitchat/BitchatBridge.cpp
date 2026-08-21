@@ -13,12 +13,12 @@ extern "C" {
 }
 
 // Platform-specific miniz includes for decompression support
+// (ESP32 only: NRF52 has decompression disabled — BITCHAT_HAS_DECOMPRESSION=0
+// in BitchatProtocol.cpp — so it needs neither miniz nor static buffers)
 #if defined(ESP32)
   extern "C" {
   #include "rom/miniz.h"
   }
-#elif defined(NRF52_PLATFORM)
-  #include "../miniz/miniz_tinfl.h"
 #endif
 
 // Debug output - Adafruit nRF52 core supports Serial.printf
@@ -71,12 +71,6 @@ BitchatDuplicateCache BitchatBridge::_duplicateCache;
 BitchatMessage BitchatBridge::_reassembledMsg;
 BitchatBridge::PeerInfo BitchatBridge::_peerCache[PEER_CACHE_SIZE];
 
-// Decompression buffers (statically allocated at compile time, shared for all decompressions)
-// These are allocated in .bss section, not on heap, to avoid malloc failures
-#if defined(NRF52_PLATFORM)
-tinfl_decompressor BitchatBridge::_decompressorStatic;
-uint8_t BitchatBridge::_decompBufferStatic[BITCHAT_MAX_PAYLOAD_SIZE];
-#endif
 
 // Module-scope static buffers (moved from function scope for stack safety on NRF52)
 // These buffers are truly outside the stack and re-entrant safe
@@ -124,19 +118,13 @@ static size_t applyPKCS7Padding(uint8_t* buffer, size_t dataLen, size_t bufferCa
 
 // Static getter implementations for decompression buffers
 tinfl_decompressor* BitchatBridge::getDecompressor() {
-#if defined(NRF52_PLATFORM)
-    return &_decompressorStatic;  // Return address of static array
-#else
-    return nullptr;  // ESP32 doesn't need this (uses ROM miniz)
-#endif
+    // No platform uses a static decompressor: ESP32 decompresses via ROM miniz
+    // with heap buffers, NRF52 has decompression disabled entirely.
+    return nullptr;
 }
 
 uint8_t* BitchatBridge::getDecompBuffer() {
-#if defined(NRF52_PLATFORM)
-    return _decompBufferStatic;  // Array name decays to pointer
-#else
-    return nullptr;  // ESP32 doesn't need this (uses ROM miniz)
-#endif
+    return nullptr;  // see getDecompressor()
 }
 
 BitchatBridge::BitchatBridge(mesh::Mesh& mesh, mesh::LocalIdentity& identity, const char* nodeName)
@@ -223,12 +211,6 @@ void BitchatBridge::begin() {
     // Channel mappings are injected by the host application (registerChannelMapping)
     // after begin() — nothing is hardcoded here any more.
 
-    // Log that decompression buffers are statically allocated
-    // These are allocated at compile time in .bss section (not heap malloc)
-#if defined(NRF52_PLATFORM)
-    Serial.printf("BITCHAT_BRIDGE: Decompression buffers statically allocated (%u bytes)\n",
-                 (unsigned)(sizeof(_decompressorStatic) + sizeof(_decompBufferStatic)));
-#endif
 
     BITCHAT_DEBUG_PRINTLN("Bridge initialized, peer ID: %08lX", (unsigned long)(_bitchatPeerId & 0xFFFFFFFF));
 
@@ -642,21 +624,8 @@ bool BitchatBridge::hasBitchatClient() const {
 }
 #elif defined(NRF52_PLATFORM)
 bool BitchatBridge::beginStandalone(const char* deviceName) {
-    Serial.println("BITCHAT_BRIDGE: beginStandalone (NRF52) entry");
-    Serial.print("BITCHAT_BRIDGE: deviceName=");
-    Serial.println(deviceName);
-    Serial.print("BITCHAT_BRIDGE: this=");
-    Serial.println((unsigned long)this, HEX);
-    Serial.flush();
-
     // Initialize Bluefruit BLE with Bitchat service
-    Serial.println("BITCHAT_BRIDGE: Calling _bleService.beginStandalone()");
-    Serial.flush();
     bool result = _bleService.beginStandalone(deviceName, this);
-    Serial.print("BITCHAT_BRIDGE: _bleService.beginStandalone() returned: ");
-    Serial.println(result);
-    Serial.flush();
-
     if (!result) {
         BITCHAT_DEBUG_PRINTLN("Failed to start BLE service");
         return false;

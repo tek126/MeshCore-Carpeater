@@ -14,9 +14,11 @@
   #include <helpers/nrf52/EthernetCLI.h>
 #endif
 
-#if defined(ENABLE_BITCHAT) && defined(ESP32)
+#if defined(ENABLE_BITCHAT) && (defined(ESP32) || defined(NRF52_PLATFORM))
   #include <helpers/bitchat/BitchatBridge.h>
-  #include <esp_task_wdt.h>
+  #ifdef ESP32
+    #include <esp_task_wdt.h>
+  #endif
   static BitchatBridge* bitchat_bridge = nullptr;
 #endif
 
@@ -146,11 +148,12 @@ void setup() {
   ethernet_start_task();
 #endif
 
-#if defined(ENABLE_BITCHAT) && defined(ESP32)
-  // BitChat bridge: the repeater has no other BLE user, so the bridge owns the
-  // BLE stack (standalone mode — the configuration the upstream author found
-  // reliable). Must start after the_mesh.begin() so the channel registry and
-  // node name are loaded.
+#if defined(ENABLE_BITCHAT) && (defined(ESP32) || defined(NRF52_PLATFORM))
+  // BitChat bridge: the repeater (mode) has no other BLE user, so the bridge
+  // owns the BLE stack (standalone mode — the configuration the upstream
+  // author found reliable). In a DUALMODE build the companion half's phone BLE
+  // never conflicts: only one mode runs per boot. Must start after
+  // the_mesh.begin() so the channel registry and node name are loaded.
   bitchat_bridge = new BitchatBridge(the_mesh, the_mesh.self_id, the_mesh.getNodeName());
   if (bitchat_bridge != nullptr) {
     bitchat_bridge->begin();
@@ -162,12 +165,15 @@ void setup() {
     the_mesh.initBitchat(bitchat_bridge);
   }
 
+  #ifdef ESP32
   // Hang insurance, ESP32 edition: the freeze this port is chasing presented
   // as a whole node dead until power cycle. If the loop task ever wedges (BLE
   // stack deadlock, blocked serial write), the task watchdog reboots the node
   // instead. Fed at the top of loop(). 60s is far beyond any legitimate pass.
+  // (nRF52 already runs the 90s hardware watchdog started above.)
   esp_task_wdt_init(60, true);
   esp_task_wdt_add(NULL);
+  #endif
 #endif
 
   // send out initial zero hop Advertisement to the mesh
@@ -186,8 +192,10 @@ void loop() {
 #ifdef NRF52_PLATFORM
   board.feedWatchdog();   // every pass through loop() proves we're alive
 #endif
-#if defined(ENABLE_BITCHAT) && defined(ESP32)
+#if defined(ENABLE_BITCHAT) && (defined(ESP32) || defined(NRF52_PLATFORM))
+  #ifdef ESP32
   esp_task_wdt_reset();   // every pass through loop() proves we're alive
+  #endif
   if (bitchat_bridge != nullptr) {
     bitchat_bridge->loop();
   }

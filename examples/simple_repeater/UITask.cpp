@@ -1,3 +1,4 @@
+#include "dualmode_rename.h"   // must precede UITask.h (renames classes under -D DUALMODE)
 #include "UITask.h"
 #include "target.h"
 #include <Arduino.h>

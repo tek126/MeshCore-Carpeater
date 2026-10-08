@@ -8,6 +8,9 @@
 #include <helpers/ArduinoHelpers.h>
 #include <helpers/SensorManager.h>
 #include <helpers/sensors/LocationProvider.h>
+#if defined(WITH_CAR_NODE) || defined(DUALMODE)
+  #include <helpers/ui/MomentaryButton.h>
+#endif
 #ifdef DISPLAY_CLASS
   #include "NullDisplayDriver.h"
 #endif
@@ -39,6 +42,12 @@ extern T1000eBoard board;
 extern WRAPPER_CLASS radio_driver;
 extern VolatileRTCClock rtc_clock;
 extern T1000SensorManager sensors;
+#if defined(WITH_CAR_NODE) || defined(DUALMODE)
+// Car node: hold-to-hibernate (simple_repeater main.cpp). Dualmode: the v1.17.0
+// repeater UITask references user_btn whenever PIN_USER_BTN + DISPLAY_CLASS are
+// set, which every dualmode env is (DISPLAY_CLASS comes in for the companion half).
+extern MomentaryButton user_btn;
+#endif
 
 bool radio_init();
 mesh::LocalIdentity radio_new_identity();

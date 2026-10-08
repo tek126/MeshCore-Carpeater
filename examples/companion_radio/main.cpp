@@ -118,7 +118,7 @@ MyMesh the_mesh(radio_driver, fast_rng, rtc_clock, tables, store);
 
 /* END GLOBAL OBJECTS */
 
-void halt() {
+static void halt() {
   while (1) ;
 }
 
@@ -132,7 +132,11 @@ void halt() {
   bool wifi_enabled = false;   // set at boot from prefs; false also when the effective SSID is blank
 #endif
 
+#ifdef DUALMODE
+void cmp_setup() {
+#else
 void setup() {
+#endif
   Serial.begin(115200);
   board.begin();
 
@@ -289,7 +293,11 @@ void setup() {
   board.onBootComplete();
 }
 
+#ifdef DUALMODE
+void cmp_loop() {
+#else
 void loop() {
+#endif
   the_mesh.loop();
   interface_manager.loop();
   sensors.loop();

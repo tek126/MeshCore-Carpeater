@@ -1,9 +1,10 @@
+#include "dualmode_rename.h"   // must precede MyMesh.h (renames classes under -D DUALMODE)
 #include <Arduino.h>   // needed for PlatformIO
 #include <Mesh.h>
 
 #include "MyMesh.h"
 
-#ifdef DISPLAY_CLASS
+#if defined(DISPLAY_CLASS) && !defined(DUALMODE)
   #include "UITask.h"
   static UITask ui_task(board, display);
 #endif
@@ -13,12 +14,12 @@
   #include <helpers/nrf52/EthernetCLI.h>
 #endif
 
-StdRNG fast_rng;
-SimpleMeshTables tables;
+static StdRNG fast_rng;
+static SimpleMeshTables tables;
 
-MyMesh the_mesh(board, radio_driver, *new ArduinoMillis(), fast_rng, rtc_clock, tables);
+static MyMesh the_mesh(board, radio_driver, *new ArduinoMillis(), fast_rng, rtc_clock, tables);
 
-void halt() {
+static void halt() {
   while (1) ;
 }
 
@@ -35,7 +36,11 @@ static unsigned long userBtnDownAt = 0;
 #define USER_BTN_HOLD_OFF_MILLIS 1500
 #endif
 
+#ifdef DUALMODE
+void rpt_setup() {
+#else
 void setup() {
+#endif
   Serial.begin(115200);
   delay(1000);
 
@@ -62,7 +67,7 @@ void setup() {
   delay(5000);
 #endif
 
-#ifdef DISPLAY_CLASS
+#if defined(DISPLAY_CLASS) && !defined(DUALMODE)
   if (display.begin()) {
     display.startFrame();
     display.setCursor(0, 0);
@@ -117,7 +122,7 @@ void setup() {
 
   the_mesh.begin(fs);
 
-#ifdef DISPLAY_CLASS
+#if defined(DISPLAY_CLASS) && !defined(DUALMODE)
   ui_task.begin(the_mesh.getNodePrefs(), FIRMWARE_BUILD_DATE, FIRMWARE_VERSION);
 #ifdef WITH_MT_BEACON
   ui_task.setBeacon(the_mesh.getBeacon());
@@ -143,7 +148,11 @@ void setup() {
   board.onBootComplete();
 }
 
+#ifdef DUALMODE
+void rpt_loop() {
+#else
 void loop() {
+#endif
 #ifdef NRF52_PLATFORM
   board.feedWatchdog();   // every pass through loop() proves we're alive
 #endif
@@ -255,7 +264,7 @@ void loop() {
 
   the_mesh.loop();
   sensors.loop();
-#ifdef DISPLAY_CLASS
+#if defined(DISPLAY_CLASS) && !defined(DUALMODE)
   ui_task.loop();
 #endif
   rtc_clock.tick();
@@ -263,7 +272,17 @@ void loop() {
 #ifdef HAS_EXTERNAL_WATCHDOG
   external_watchdog.loop();
 #endif
-  if (the_mesh.getNodePrefs()->powersaving_enabled && !the_mesh.hasPendingWork()) {
+  bool may_sleep = the_mesh.getNodePrefs()->powersaving_enabled && !the_mesh.hasPendingWork();
+#ifdef DUALMODE
+  // Power-saving sleep stays enabled in dual-mode, but is suppressed during a
+  // user-button press burst so the launcher can poll the 5x mode-switch at full
+  // speed (the burst's final event dispatches ~500ms after the last release).
+  // A button edge wakes us from sleep via the GPIO interrupt armed in the
+  // launcher, so idle battery life is preserved between presses.
+  extern bool dualmode_button_active();
+  if (dualmode_button_active()) may_sleep = false;
+#endif
+  if (may_sleep) {
 #if defined(NRF52_PLATFORM)
     board.sleep(0); // nrf ignores seconds param, sleeps whenever possible
 #else

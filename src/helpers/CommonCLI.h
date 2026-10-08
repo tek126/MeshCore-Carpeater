@@ -9,6 +9,16 @@
 #include <helpers/CommonRadioPrefs.h>
 #include <helpers/DynamicConfigSerializer.h>
 
+#ifdef DUALMODE
+// The companion app defines its own polymorphic `NodePrefs`; in a DUALMODE
+// build both classes would share one vtable (vague linkage keeps a single
+// weak `vtable for NodePrefs` for the whole binary), making each half run
+// the other's structure() against the wrong layout. Rename this one so each
+// half keeps its own vtable. Identical #define in simple_repeater's
+// dualmode_rename.h — repeater TUs include that first.
+#define NodePrefs RptNodePrefs
+#endif
+
 #if defined(WITH_RS232_BRIDGE) || defined(WITH_ESPNOW_BRIDGE)
 #define WITH_BRIDGE
 #endif

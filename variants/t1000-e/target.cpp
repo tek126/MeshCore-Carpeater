@@ -14,6 +14,12 @@ VolatileRTCClock rtc_clock;
 MicroNMEALocationProvider nmea = MicroNMEALocationProvider(Serial1, &rtc_clock);
 T1000SensorManager sensors = T1000SensorManager(nmea);
 
+#if defined(WITH_CAR_NODE) || defined(DUALMODE)
+// Active-HIGH user button (vs active-LOW on the Heltecs), so no reverse, and
+// pull the pin down when idle.
+MomentaryButton user_btn(PIN_USER_BTN, 1000, false, true);
+#endif
+
 #ifdef DISPLAY_CLASS
   NullDisplayDriver display;
 #endif

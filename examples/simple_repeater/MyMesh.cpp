@@ -1,3 +1,4 @@
+#include "dualmode_rename.h"   // must precede MyMesh.h (renames classes under -D DUALMODE)
 #include "MyMesh.h"
 #include <algorithm>
 #include <helpers/TimeSanity.h>

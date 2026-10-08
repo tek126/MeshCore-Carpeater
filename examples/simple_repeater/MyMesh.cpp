@@ -1,5 +1,6 @@
 #include "MyMesh.h"
 #include <algorithm>
+#include <helpers/TimeSanity.h>
 
 /* ------------------------------ Config -------------------------------- */
 
@@ -87,6 +88,18 @@ void MyMesh::putNeighbour(const mesh::Identity &id, uint32_t timestamp, float sn
 #endif
 }
 
+// The replay guard is only as good as the timestamp it remembers. If a client's
+// clock was ever far in the future (a GPS fix with a garbage date, a corrupted
+// RTC restore), its stored last_timestamp is years ahead, and every correctly
+// timed login, request and CLI command after that looks like a replay -- for
+// good, because the ACL is persisted. Treat an implausible stored value as "no
+// history", and refuse to accept (and so store) an implausible new one.
+static bool replayGuardAccepts(ClientInfo* client, uint32_t sender_timestamp) {
+  if (!time_sanity::plausible(sender_timestamp)) return false;
+  if (!time_sanity::plausible(client->last_timestamp)) client->last_timestamp = 0;
+  return true;
+}
+
 uint8_t MyMesh::handleLoginReq(const mesh::Identity& sender, const uint8_t* secret, uint32_t sender_timestamp, const uint8_t* data, bool is_flood) {
   ClientInfo* client = NULL;
   if (data[0] == 0) {   // blank password, just check if sender is in ACL
@@ -111,7 +124,7 @@ uint8_t MyMesh::handleLoginReq(const mesh::Identity& sender, const uint8_t* secr
     }
 
     client = acl.putClient(sender, 0);  // add to contacts (if not already known)
-    if (sender_timestamp <= client->last_timestamp) {
+    if (!replayGuardAccepts(client, sender_timestamp) || sender_timestamp <= client->last_timestamp) {
       MESH_DEBUG_PRINTLN("Possible login replay attack!");
       return 0;  // FATAL: client table is full -OR- replay attack
     }
@@ -673,7 +686,7 @@ void MyMesh::onPeerDataRecv(mesh::Packet *packet, uint8_t type, int sender_idx, 
     uint32_t timestamp;
     memcpy(&timestamp, data, 4);
 
-    if (timestamp > client->last_timestamp) { // prevent replay attacks
+    if (replayGuardAccepts(client, timestamp) && timestamp > client->last_timestamp) { // prevent replay attacks
       int reply_len = handleRequest(client, timestamp, &data[4], len - 4);
       if (reply_len == 0) return; // invalid command
 
@@ -706,7 +719,8 @@ void MyMesh::onPeerDataRecv(mesh::Packet *packet, uint8_t type, int sender_idx, 
 
     if (!(flags == TXT_TYPE_PLAIN || flags == TXT_TYPE_CLI_DATA || flags == TXT_TYPE_CLI_COMMAND)) {
       MESH_DEBUG_PRINTLN("onPeerDataRecv: unsupported text type received: flags=%02x", (uint32_t)flags);
-    } else if (sender_timestamp >= client->last_timestamp) { // prevent replay attacks
+    } else if (replayGuardAccepts(client, sender_timestamp)
+               && sender_timestamp >= client->last_timestamp) { // prevent replay attacks
       bool is_retry = (sender_timestamp == client->last_timestamp);
       client->last_timestamp = sender_timestamp;
       client->last_activity = getRTCClock()->getCurrentTime();

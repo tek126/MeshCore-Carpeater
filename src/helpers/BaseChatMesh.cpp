@@ -133,7 +133,10 @@ void BaseChatMesh::onAdvertRecv(mesh::Packet* packet, const mesh::Identity& id, 
   for (int i = 0; i < num_contacts; i++) {
     if (id.matches(contacts[i].id)) {  // is from one of our contacts
       from = &contacts[i];
-      if (timestamp <= from->last_advert_timestamp) {  // check for replay attacks!!
+      // a stored timestamp from a far-future clock excursion would otherwise reject
+      // every advert from this contact once its clock is corrected
+      if (timestamp <= from->last_advert_timestamp
+          && time_sanity::plausible(from->last_advert_timestamp)) {  // check for replay attacks!!
         MESH_DEBUG_PRINTLN("onAdvertRecv: Possible replay attack, name: %s", from->name);
         return;
       }

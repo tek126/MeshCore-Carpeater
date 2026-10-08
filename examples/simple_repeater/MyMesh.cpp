@@ -1,5 +1,6 @@
 #include "dualmode_rename.h"   // must precede MyMesh.h (renames classes under -D DUALMODE)
 #include "MyMesh.h"
+#include "LoopDiag.h"
 #include <algorithm>
 #include <helpers/TimeSanity.h>
 
@@ -1369,6 +1370,12 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
       sendNodeDiscoverReq();
       strcpy(reply, "OK - Discover sent");
     }
+#if defined(ESP32)
+  } else if (strcmp(command, "diag") == 0) {
+    // loop-hang breadcrumb: "<last reset>.<phase stuck in at the last watchdog
+    // rescue>.<rescues since power-on> last=<phase the previous run ended in>"
+    sprintf(reply, "> %s", loop_diag::summary());
+#endif
   } else if (_blocker.handleCommand(command, reply, _fs)) {
     // handled by the channel blocklist ("block ..." / "unblock ..." verbs)
 #ifdef WITH_MT_BEACON
@@ -1390,6 +1397,7 @@ void MyMesh::loop() {
 #endif
 
   mesh::Mesh::loop();
+  LOOP_DIAG_MARK(ADVERT);
 
   if (next_flood_advert && millisHasNowPassed(next_flood_advert)) {
     mesh::Packet *pkt = createSelfAdvert();
@@ -1429,6 +1437,7 @@ void MyMesh::loop() {
     dirty_contacts_expiry = 0;
   }
 
+  LOOP_DIAG_MARK(BEACON);
 #ifdef WITH_MT_BEACON
   // Time-slice a Meshtastic beacon onto the air when the mesh is idle. Restores
   // the repeater's current radio params (incl. any temp override) afterwards.
@@ -1492,6 +1501,7 @@ void MyMesh::loop() {
     // to MeshCore too: update our advert location and flood a fresh advert so the
     // whole mesh learns where we stopped. (advert_loc_policy stays PREFS, so the
     // advert reads these prefs.) Persisted so it survives a reboot while parked.
+    LOOP_DIAG_MARK(READVERT);
     double rlat, rlon;
     if (_carnode.takeReadvert(rlat, rlon)) {
       // Only persist when the fix actually moved: a re-advert that failed to

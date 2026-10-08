@@ -3,6 +3,7 @@
 #include <Mesh.h>
 
 #include "MyMesh.h"
+#include "LoopDiag.h"
 
 #if defined(DISPLAY_CLASS) && !defined(DUALMODE)
   #include "UITask.h"
@@ -146,6 +147,7 @@ void setup() {
 #endif
 
   board.onBootComplete();
+  LOOP_DIAG_BEGIN();   // ESP32: arm the loop watchdog last, so a slow first boot can't trip it
 }
 
 #ifdef DUALMODE
@@ -156,8 +158,10 @@ void loop() {
 #ifdef NRF52_PLATFORM
   board.feedWatchdog();   // every pass through loop() proves we're alive
 #endif
+  LOOP_DIAG_FEED();
 
   // Handle Serial CLI
+  LOOP_DIAG_MARK(CLI);
   int len = strlen(command);
   // `command` must stay NUL-terminated within its bounds. If it ever isn't,
   // strlen() above can return >= sizeof(command) and the loop below would then
@@ -214,6 +218,7 @@ void loop() {
   }
 #endif
 
+  LOOP_DIAG_MARK(BUTTON);
 #if defined(PIN_USER_BTN) && defined(_SEEED_SENSECAP_SOLAR_H_) && !defined(DISPLAY_CLASS)
   // Hold the user button to power off the SenseCAP Solar repeater.
   int btnState = digitalRead(PIN_USER_BTN);
@@ -254,6 +259,7 @@ void loop() {
           display.endFrame();
         }
       #endif
+        LOOP_DIAG_MARK(HIBERNATE);   // so a later reset can tell hibernate from a hang
         board.hibernateButtonWake(PIN_USER_BTN);   // wake on button only; does not return
       }
     } else {
@@ -262,11 +268,15 @@ void loop() {
   }
 #endif
 
+  LOOP_DIAG_MARK(MESH);
   the_mesh.loop();
+  LOOP_DIAG_MARK(SENSORS);
   sensors.loop();
 #if defined(DISPLAY_CLASS) && !defined(DUALMODE)
+  LOOP_DIAG_MARK(UI);
   ui_task.loop();
 #endif
+  LOOP_DIAG_MARK(CLOCK);
   rtc_clock.tick();
 
 #ifdef HAS_EXTERNAL_WATCHDOG
@@ -287,8 +297,11 @@ void loop() {
     board.sleep(0); // nrf ignores seconds param, sleeps whenever possible
 #else
     if (the_mesh.millisHasNowPassed(POWERSAVING_FIRSTSLEEP_SECS * 1000)) { // To check if it is time to sleep
+      LOOP_DIAG_MARK(SLEEP);
+      LOOP_DIAG_FEED();  // the sleep below is capped at 30 s, inside the 60 s watchdog
       board.sleep(30); // Sleep. Wake up after a while or when receiving a LoRa packet
     }
 #endif
   }
+  LOOP_DIAG_MARK(IDLE);
 }

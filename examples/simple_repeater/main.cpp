@@ -41,6 +41,17 @@ void setup() {
 
   board.begin();
 
+#ifdef NRF52_PLATFORM
+  // Hard-hang insurance: if loop() ever stalls (wedged radio wait, runaway
+  // spin), the hardware watchdog reboots the node instead of leaving it dead
+  // until someone drives out and power-cycles it. Fed at the top of loop().
+  board.startWatchdog(90);
+  // Breadcrumb for post-mortems ("Watchdog" here = the WDT above fired last
+  // boot). Also remotely queryable via 'get pwrmgt.bootreason'.
+  Serial.print("Reset reason: ");
+  Serial.println(board.getResetReasonString(board.getResetReason()));
+#endif
+
 #ifdef HAS_EXTERNAL_WATCHDOG
   external_watchdog.begin();
 #endif
@@ -123,6 +134,10 @@ void setup() {
 }
 
 void loop() {
+#ifdef NRF52_PLATFORM
+  board.feedWatchdog();   // every pass through loop() proves we're alive
+#endif
+
   // Handle Serial CLI
   int len = strlen(command);
   // `command` must stay NUL-terminated within its bounds. If it ever isn't,

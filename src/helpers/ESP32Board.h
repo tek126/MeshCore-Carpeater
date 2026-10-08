@@ -2,6 +2,7 @@
 
 #include <MeshCore.h>
 #include <Arduino.h>
+#include <helpers/TimeSanity.h>
 
 #ifndef USER_BTN_PRESSED
 #define USER_BTN_PRESSED LOW
@@ -214,9 +215,13 @@ public:
       return;  // ESP-IDF preserves system time across deep sleep
     }
     // All other resets (power-on, crash, WDT, brownout) lose system time.
-    // Restore from RTC backup if valid, otherwise use hardcoded seed.
+    // Restore from RTC backup if valid, otherwise use hardcoded seed.  The
+    // backup is also checked against the plausibility window: a far-future
+    // value (bad GPS date, bad 'time' set) would otherwise be restored on
+    // every reset and could never be cleared.
     struct timeval tv;
-    if (_rtc_backup_magic == RTC_BACKUP_MAGIC && _rtc_backup_time > RTC_TIME_MIN) {
+    if (_rtc_backup_magic == RTC_BACKUP_MAGIC && _rtc_backup_time > RTC_TIME_MIN
+        && time_sanity::plausible(_rtc_backup_time)) {
       tv.tv_sec = _rtc_backup_time;
     } else {
       tv.tv_sec = RTC_TIME_MIN;

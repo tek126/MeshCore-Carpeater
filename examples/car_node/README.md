@@ -127,7 +127,7 @@ but one beacon engine (no second transmitter):
 | Command | Function |
 | --- | --- |
 | `carnode` / `carnode status` | Show the drive state (nofix/driving/parked/sleeping/*zone*) and the park configuration. |
-| `carnode park <sec>` | The stopped time before an update (30–86400; default 300). |
+| `carnode park <sec>` | The stopped time before an update (30–65535; default 300). |
 | `carnode radius <m>` | Movement in this distance is "stopped" (5–2000; default 30). |
 | `carnode advertdelay <sec>` | The time from the Meshtastic burst to the MeshCore advert (0–600; default 10). |
 | `carnode sleep <hours>` | Parked this many hours → stop repeating until it drives again (0–720; 0 = never; default 20). |

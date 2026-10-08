@@ -122,7 +122,7 @@ public:
     uint8_t  send_position;  // emit Position (map pin) on the Meshtastic burst
     uint8_t  text_mult;      // chat text N times per flood-advert period (0=never)
     int8_t   tx_power;
-    uint16_t park_secs;      // stationary time before a unified location update fires
+    uint16_t park_secs;      // stationary time before a unified location update fires (<= 65535)
     uint16_t stop_radius_m;  // movement within this radius counts as "stopped"
     uint16_t advert_delay_s; // gap between the Meshtastic burst and the MeshCore advert
     uint16_t sleep_hours;    // parked this long -> stop repeating until driving (0=never)
@@ -341,7 +341,7 @@ private:
 
   void sanitize() {
     cfg.tx_power = constrain(cfg.tx_power, -9, 22);
-    cfg.park_secs = constrain(cfg.park_secs, 30, 86400);
+    cfg.park_secs = constrain(cfg.park_secs, 30, 65535);
     cfg.stop_radius_m = constrain(cfg.stop_radius_m, 5, 2000);
     cfg.advert_delay_s = constrain(cfg.advert_delay_s, 0, 600);
     cfg.sleep_hours = constrain(cfg.sleep_hours, 0, 720);
@@ -391,7 +391,7 @@ private:
     Serial.println(F("carnode commands (mobile/park behaviour):"));
     Serial.println(F("  status             show drive state + park config"));
     Serial.println(F("  on | off | send    enable/disable/push now (also under 'mtbeacon')"));
-    Serial.println(F("  park <sec>         stopped time before an update fires, 30-86400"));
+    Serial.println(F("  park <sec>         stopped time before an update fires, 30-65535"));
     Serial.println(F("  radius <m>         movement within this counts as stopped, 5-2000"));
     Serial.println(F("  advertdelay <sec>  gap: Meshtastic burst -> MeshCore advert, 0-600"));
     Serial.println(F("  sleep <hours>      parked this long -> stop repeating until driving, 0=never"));
@@ -1051,7 +1051,7 @@ public:
       pending_send = true; pending_text = true; strcpy(reply, "OK - pushing location update shortly");
     } else if (memcmp(a, "park ", 5) == 0) {
       int s = atoi(a + 5);
-      if (s < 30 || s > 86400) { strcpy(reply, "Error: park 30-86400 sec"); }
+      if (s < 30 || s > 65535) { strcpy(reply, "Error: park 30-65535 sec"); }
       else { cfg.park_secs = s; save(fs); sprintf(reply, "OK - update after %d sec stopped", s); }
     } else if (memcmp(a, "radius ", 7) == 0) {
       int m = atoi(a + 7);

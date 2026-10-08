@@ -446,6 +446,16 @@ void MyMesh::sendFloodReply(mesh::Packet* packet, unsigned long delay_millis, ui
 
 bool MyMesh::allowPacketForward(const mesh::Packet *packet) {
   if (_prefs.disable_fwd) return false;
+  // Operator-configured channel blocklist: group text/data carry the 1-byte
+  // channel hash at payload[0]. Drop (don't repeat) any that match a `block`ed
+  // #channel. Other payload types have no channel hash and are unaffected.
+  {
+    uint8_t t = packet->getPayloadType();
+    if ((t == PAYLOAD_TYPE_GRP_TXT || t == PAYLOAD_TYPE_GRP_DATA)
+        && packet->payload_len >= 1 && _blocker.isBlocked(packet->payload[0])) {
+      return false;
+    }
+  }
   if (packet->isRouteFlood()
       && mesh::isFloodHopLimitExceeded(packet, _prefs.flood_max, _prefs.flood_max_unscoped, _prefs.flood_max_advert)) {
     return false;
@@ -962,6 +972,7 @@ void MyMesh::begin(FILESYSTEM *fs) {
   // load persisted prefs
   _cli.loadPrefs(_fs);
   acl.load(_fs, self_id);
+  _blocker.begin(_fs);
   // TODO: key_store.begin();
   region_map.load(_fs);
 
@@ -1295,6 +1306,8 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
       sendNodeDiscoverReq();
       strcpy(reply, "OK - Discover sent");
     }
+  } else if (_blocker.handleCommand(command, reply, _fs)) {
+    // handled by the channel blocklist ("block ..." / "unblock ..." verbs)
   } else{
     _cli.handleCommand(sender_timestamp, command, reply);  // common CLI commands
   }

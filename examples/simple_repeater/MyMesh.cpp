@@ -2,7 +2,7 @@
 #include <algorithm>
 #include <helpers/TimeSanity.h>
 
-#ifdef WITH_MT_BEACON
+#if defined(WITH_MT_BEACON) || defined(WITH_CAR_NODE)
 extern RADIO_CLASS radio;   // concrete RadioLib radio (defined in the variant target.cpp)
 #endif
 
@@ -216,7 +216,7 @@ uint8_t MyMesh::handleAnonClockReq(const mesh::Identity& sender, uint32_t sender
 #elif WITH_ESPNOW_BRIDGE
     reply_data[8] |= 0x03;  // is bridge, type ESP-NOW
 #endif
-    if (_prefs.disable_fwd) {   // is this repeater currently disabled
+    if (repeatDisabled()) {   // is this repeater currently disabled (pref or repeat-sleep)
       reply_data[8] |= 0x80;  // is disabled
     }
     // TODO:  add some kind of moving-window utilisation metric, so can query 'how busy' is this repeater
@@ -449,7 +449,7 @@ void MyMesh::sendFloodReply(mesh::Packet* packet, unsigned long delay_millis, ui
 }
 
 bool MyMesh::allowPacketForward(const mesh::Packet *packet) {
-  if (_prefs.disable_fwd) return false;
+  if (repeatDisabled()) return false;
   // Operator-configured channel blocklist: group text/data carry the 1-byte
   // channel hash at payload[0]. Drop (don't repeat) any that match a `block`ed
   // #channel. Other payload types have no channel hash and are unaffected.
@@ -817,7 +817,7 @@ bool MyMesh::onPeerPathRecv(mesh::Packet *packet, int sender_idx, const uint8_t 
 void MyMesh::onControlDataRecv(mesh::Packet* packet) {
   uint8_t type = packet->payload[0] & 0xF0;    // just test upper 4 bits
   if (type == CTL_TYPE_NODE_DISCOVER_REQ && packet->payload_len >= 6
-      && !_prefs.disable_fwd && discover_limiter.allow(rtc_clock.getCurrentTime())
+      && !repeatDisabled() && discover_limiter.allow(rtc_clock.getCurrentTime())
       && !isHiddenNode()   // this node wishes to NOT be discoverable
   ) {
     int i = 1;
@@ -948,7 +948,11 @@ MyMesh::MyMesh(mesh::MainBoard &board, mesh::Radio &radio, mesh::MillisecondCloc
   StrHelper::strncpy(_prefs.bridge_secret, "LVSITANOS", sizeof(_prefs.bridge_secret));
 
   // GPS defaults
+#ifdef WITH_CAR_NODE
+  _prefs.gps_enabled = 1;   // mobile node: GPS on out of the box for live position
+#else
   _prefs.gps_enabled = 0;
+#endif
   _prefs.gps_interval = 0;
   _prefs.advert_loc_policy = ADVERT_LOC_PREFS;
 
@@ -985,6 +989,15 @@ void MyMesh::begin(FILESYSTEM *fs) {
     uint32_t node = ((uint32_t)pk[0] << 24) | ((uint32_t)pk[1] << 16) | ((uint32_t)pk[2] << 8) | pk[3];
     uint32_t seed = ((uint32_t)pk[4] << 24) | ((uint32_t)pk[5] << 16) | ((uint32_t)pk[6] << 8) | pk[7];
     _beacon.begin(_fs, node, seed);
+  }
+#endif
+#ifdef WITH_CAR_NODE
+  // Derive a stable Meshtastic node number + starting packet id from our pubkey.
+  {
+    const uint8_t* pk = self_id.pub_key;
+    uint32_t node = ((uint32_t)pk[0] << 24) | ((uint32_t)pk[1] << 16) | ((uint32_t)pk[2] << 8) | pk[3];
+    uint32_t seed = ((uint32_t)pk[4] << 24) | ((uint32_t)pk[5] << 16) | ((uint32_t)pk[6] << 8) | pk[7];
+    _carnode.begin(_fs, node, seed);
   }
 #endif
   // TODO: key_store.begin();
@@ -1077,6 +1090,9 @@ void MyMesh::sendSelfAdvertisement(int delay_millis, bool flood) {
 #ifdef WITH_MT_BEACON
       _beacon.onFloodAdvert();  // an explicit flood advert (CLI 'advert') also carries the text
 #endif
+#ifdef WITH_CAR_NODE
+      _carnode.onFloodAdvert(); // ditto for the car node
+#endif
     } else {
       sendZeroHop(pkt, delay_millis);
     }
@@ -1084,6 +1100,35 @@ void MyMesh::sendSelfAdvertisement(int delay_millis, bool flood) {
     MESH_DEBUG_PRINTLN("ERROR: unable to create advertisement packet!");
   }
 }
+
+#ifdef WITH_CAR_NODE
+// The park re-advert, as a *checked* flood advert. Unlike sendSelfAdvertisement()
+// this reports whether the packet actually made it onto the send queue: both
+// createSelfAdvert() (packet pool exhausted) and queueOutbound() (send queue
+// full) fail silently, and a lost park re-advert is never retried on its own --
+// the park is already marked reported. The car node re-arms the handoff on false.
+//
+// The queue is checked by count because sendFlood() has no return value; it
+// queues exactly one packet, so a total that did not grow means it was dropped.
+bool MyMesh::sendParkReadvert(int delay_millis) {
+  mesh::Packet *pkt = createSelfAdvert();
+  if (!pkt) {
+    MESH_DEBUG_PRINTLN("carnode: no free packet for park re-advert");
+    return false;
+  }
+  int before = _mgr->getOutboundTotal();
+  sendFloodScoped(default_scope, pkt, delay_millis, _prefs.path_hash_mode + 1);
+  if (_mgr->getOutboundTotal() <= before) {
+    MESH_DEBUG_PRINTLN("carnode: park re-advert dropped, send queue full");
+    return false;
+  }
+  // Deliberately NOT calling _carnode.onFloodAdvert() here (see its comment):
+  // the park burst just finished and already carried the chat text, and this
+  // advert is still queued behind advertdelay -- arming another Meshtastic
+  // burst 15 s out would land a second retune right on top of it.
+  return true;
+}
+#endif
 
 void MyMesh::updateAdvertTimer() {
   if (_prefs.advert_interval > 0) { // schedule local advert timer
@@ -1329,6 +1374,10 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
   } else if (_beacon.handleCommand(command, reply, _fs)) {
     // handled by the Meshtastic beacon ("mtbeacon ..." verbs)
 #endif
+#ifdef WITH_CAR_NODE
+  } else if (_carnode.handleCommand(command, reply, _fs)) {
+    // handled by the car node: "mtbeacon ..." (beacon RF) + "carnode ..." (park)
+#endif
   } else{
     _cli.handleCommand(sender_timestamp, command, reply);  // common CLI commands
   }
@@ -1350,6 +1399,9 @@ void MyMesh::loop() {
     updateAdvertTimer();      // also schedule local advert (so they don't overlap)
 #ifdef WITH_MT_BEACON
     _beacon.onFloodAdvert();  // Meshtastic chat text rides a burst shortly after
+#endif
+#ifdef WITH_CAR_NODE
+    _carnode.onFloodAdvert(); // ditto for the car node
 #endif
   } else if (next_local_advert && millisHasNowPassed(next_local_advert)) {
     mesh::Packet *pkt = createSelfAdvert();
@@ -1399,6 +1451,75 @@ void MyMesh::loop() {
     ctx.home_sync = MESHCORE_SYNC_WORD;
     ctx.home_tx_power = _prefs.tx_power_dbm;
     _beacon.tick(radio_driver, radio, busy, ctx);
+  }
+#endif
+
+#ifdef WITH_CAR_NODE
+  // Mobile beacon: announce our LIVE GPS position on Meshtastic when the mesh
+  // is idle, paced by movement. Restores the repeater's current radio params.
+  {
+    // isInRecvMode() is false while a MeshCore transmit is in flight (the packet
+    // has already been dequeued, so hasPendingWork() no longer sees it). Without
+    // this the beacon could retune the radio mid-transmit, aborting the send and
+    // leaving the radio in a state where the next CAD never completes.
+    bool busy = hasPendingWork() || radio_driver.isReceiving()
+             || !radio_driver.isInRecvMode();
+    CarNodeControl::Context ctx;
+    ctx.node_name = _prefs.node_name;
+    // Live fix from the sensor manager's GPS, falling back to configured location.
+    LocationProvider* loc = sensors.getLocationProvider();
+    if (loc && loc->isValid()) {
+      ctx.lat = sensors.node_lat;   // degrees, kept live by EnvironmentSensorManager::loop()
+      ctx.lon = sensors.node_lon;
+      ctx.gps_valid = true;
+    } else {
+      ctx.lat = _prefs.node_lat;
+      ctx.lon = _prefs.node_lon;
+      ctx.gps_valid = false;
+    }
+    ctx.epoch = getRTCClock()->getCurrentTime();
+    ctx.flood_advert_hours = _prefs.flood_advert_interval;   // paces the chat text
+    ctx.batt_millivolts = board.getBattMilliVolts();         // Telemetry: battery
+    ctx.uptime_secs = (uint32_t)(uptime_millis / 1000);      // Telemetry: uptime
+    ctx.home_freq = _prefs.freq; ctx.home_bw = _prefs.bw;
+    ctx.home_sf = _prefs.sf;     ctx.home_cr = _prefs.cr;
+    ctx.home_sync = MESHCORE_SYNC_WORD;
+    ctx.home_tx_power = _prefs.tx_power_dbm;
+    _carnode.tick(radio_driver, radio, busy, ctx);
+
+    // When the car node decides the vehicle has parked, it pushes the *same* fix
+    // to MeshCore too: update our advert location and flood a fresh advert so the
+    // whole mesh learns where we stopped. (advert_loc_policy stays PREFS, so the
+    // advert reads these prefs.) Persisted so it survives a reboot while parked.
+    double rlat, rlon;
+    if (_carnode.takeReadvert(rlat, rlon)) {
+      // Only persist when the fix actually moved: a re-advert that failed to
+      // queue is handed back and retried, and rewriting identical prefs on each
+      // attempt would burn flash for nothing.
+      if (_prefs.node_lat != rlat || _prefs.node_lon != rlon) {
+        _prefs.node_lat = rlat;
+        _prefs.node_lon = rlon;
+        savePrefs();
+      }
+      // Space the MeshCore advert after the Meshtastic burst so the two don't
+      // land on top of each other (delay is the `carnode advertdelay` knob).
+      if (sendParkReadvert((int)_carnode.advertDelayMs())) {
+        _carnode.readvertQueued();
+        updateFloodAdvertTimer();          // push the next periodic flood advert out
+      } else {
+        // Could not queue it. Hand it back for a retry, and leave the periodic
+        // flood-advert timer ALONE: if the retries also fail, the next scheduled
+        // advert carries the location (already saved above) instead of slipping
+        // a full flood_advert_interval.
+        _carnode.readvertFailed();
+      }
+    }
+
+    // Repeat sleep (parked past the limit, or parked in a quiet zone, which
+    // suppresses immediately) needs nothing here: repeatDisabled() ORs
+    // _carnode.repeatSuppressed() in, so forwarding, the advert 'disabled' bit
+    // and node-discover all follow it without anyone writing to _prefs. See the
+    // comment on repeatDisabled() for why touching the pref was a bug.
   }
 #endif
 

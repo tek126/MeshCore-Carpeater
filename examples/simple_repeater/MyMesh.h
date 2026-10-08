@@ -42,6 +42,10 @@
 #include "MtBeaconControl.h"   // -I examples/meshtastic_beacon
 #endif
 
+#ifdef WITH_CAR_NODE
+#include "CarNodeControl.h"   // -I examples/car_node (+ -I examples/meshtastic_beacon)
+#endif
+
 #ifdef WITH_BRIDGE
 extern AbstractBridge* bridge;
 #endif
@@ -75,9 +79,15 @@ struct NeighbourInfo {
   #define FIRMWARE_BUILD_DATE   "15 Oct 2026"
 #endif
 
+// Fallbacks only: the *_carnode envs override FIRMWARE_VERSION with the git
+// short SHA via carnode_version.py. Keep these in step with the mtbeacon
+// version the beacon here is synced to, so a build without the extra_script
+// still reports something truthful.
 #ifndef FIRMWARE_VERSION
   #ifdef WITH_MT_BEACON
     #define FIRMWARE_VERSION   "v1.18.0+mtbeacon-0.2.7"
+  #elif defined(WITH_CAR_NODE)
+    #define FIRMWARE_VERSION   "v1.18.0+carnode-0.2.9"
   #else
     #define FIRMWARE_VERSION   "v1.18.0"
   #endif
@@ -99,6 +109,9 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
   ChannelBlocker _blocker;   // #channels this repeater is configured not to repeat
 #ifdef WITH_MT_BEACON
   MtBeaconControl _beacon;
+#endif
+#ifdef WITH_CAR_NODE
+  CarNodeControl _carnode;
 #endif
   uint8_t reply_data[MAX_PACKET_PAYLOAD];
   uint8_t reply_path[MAX_PATH_SIZE];
@@ -139,6 +152,25 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
 
   File openAppend(const char* fname);
   bool isLooped(const mesh::Packet* packet, const uint8_t max_counters[]);
+
+  // Is forwarding currently off? Either the 'set repeat on|off' pref, or -- on a
+  // car node -- the park sleep / quiet zone holding it off for now.
+  //
+  // The two are deliberately kept SEPARATE. An earlier version had the car node
+  // write _prefs.disable_fwd directly and restore it on wake, which looked tidy
+  // ("one switch, visible everywhere") but was a latch waiting to happen: any
+  // unrelated `set ...` command persists the whole NodePrefs struct, so touching
+  // a setting while parked in a quiet zone wrote the suppressed value to flash.
+  // From then on the wake path -- which only restores repeat if it was ON when
+  // the sleep tripped -- read back OFF, captured "don't restore", and left the
+  // node deaf for good. Suppression is a runtime condition; it does not get a
+  // vote on a persisted pref.
+  bool repeatDisabled() const {
+#ifdef WITH_CAR_NODE
+    if (_carnode.repeatSuppressed()) return true;
+#endif
+    return _prefs.disable_fwd;
+  }
 
 protected:
   float getAirtimeBudgetFactor() const override {
@@ -203,6 +235,9 @@ public:
   bool isHiddenNode() const {
     return _prefs.advert_interval == 0 && _prefs.flood_advert_interval == 0;
   }
+#ifdef WITH_CAR_NODE
+  CarNodeControl* getCarNode() { return &_carnode; }
+#endif
 #ifdef WITH_MT_BEACON
   MtBeaconControl* getBeacon() { return &_beacon; }
 #endif
@@ -217,6 +252,9 @@ public:
   void applyTempRadioParams(float freq, float bw, uint8_t sf, uint8_t cr, int timeout_mins) override;
   bool formatFileSystem() override;
   void sendSelfAdvertisement(int delay_millis, bool flood) override;
+#ifdef WITH_CAR_NODE
+  bool sendParkReadvert(int delay_millis);
+#endif
   void updateAdvertTimer() override;
   void updateFloodAdvertTimer() override;
 

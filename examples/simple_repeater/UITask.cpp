@@ -5,6 +5,9 @@
 #ifdef WITH_MT_BEACON
 #include "MtBeaconControl.h"   // -I examples/meshtastic_beacon
 #endif
+#ifdef WITH_CAR_NODE
+#include "CarNodeControl.h"   // -I examples/car_node
+#endif
 
 #ifndef USER_BTN_PRESSED
 #define USER_BTN_PRESSED LOW
@@ -75,7 +78,9 @@ void UITask::renderCurrScreen() {
     _display->drawTextCentered(_display->width() / 2, 35, _version_info);
 
     // node type
-#if defined(WITH_MT_BEACON)
+#if defined(WITH_CAR_NODE)
+    const char* node_type = "< Repeater +CarNode >";
+#elif defined(WITH_MT_BEACON)
     const char* node_type = "< Repeater +Beacon >";
 #else
     const char* node_type = "< Repeater >";
@@ -121,6 +126,16 @@ void UITask::renderCurrScreen() {
       _beacon->uiLine(b, sizeof(b));
       _display->setCursor(0, 40);
       _display->setColor(_beacon->enabled() ? UIColor::primary_txt : UIColor::warning_txt);
+      _display->print(b);
+    }
+#endif
+#ifdef WITH_CAR_NODE
+    // live car-node beacon status (warning color when off)
+    if (_carnode) {
+      char b[40];
+      _carnode->uiLine(b, sizeof(b));
+      _display->setCursor(0, 40);
+      _display->setColor(_carnode->enabled() ? UIColor::primary_txt : UIColor::warning_txt);
       _display->print(b);
     }
 #endif

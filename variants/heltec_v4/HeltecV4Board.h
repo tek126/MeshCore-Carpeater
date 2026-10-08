@@ -30,6 +30,8 @@ public:
   void onBeforeTransmit(void) override;
   void onAfterTransmit(void) override;
   void powerOff() override;
+  // Hibernate waking on the user button ONLY (no LoRa-RX wake) -- does not return.
+  void hibernateButtonWake(int pin_btn);
   uint16_t getBattMilliVolts() override;
   bool setAdcMultiplier(float multiplier) override {
     if (multiplier == 0.0f) {

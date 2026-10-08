@@ -122,6 +122,13 @@ void setup() {
 #ifdef WITH_MT_BEACON
   ui_task.setBeacon(the_mesh.getBeacon());
 #endif
+#ifdef WITH_CAR_NODE
+  ui_task.setCarNode(the_mesh.getCarNode());
+#endif
+#endif
+
+#ifdef WITH_CAR_NODE
+  user_btn.begin();   // hold-to-hibernate uses the shared MomentaryButton
 #endif
 
 #ifdef ETHERNET_ENABLED
@@ -210,6 +217,39 @@ void loop() {
     }
   } else {
     userBtnDownAt = 0;
+  }
+#endif
+
+#ifdef WITH_CAR_NODE
+  // Hold the user button for CAR_NODE_HOLD_OFF_MILLIS (~3 s) to hibernate the
+  // car node via board.hibernateButtonWake(): the board enters its lowest-power
+  // state, waking only on the user button, and does not return.
+  //   V4   -> ESP32 deep sleep (button-only wake, stays asleep through LoRa RX).
+  //   T114 -> nRF52 SYSTEMOFF with a button SENSE wake (SD-aware); wake reboots.
+  // On both, tap the button to wake (on V4 don't hold GPIO0 through reset).
+  #ifndef CAR_NODE_HOLD_OFF_MILLIS
+    #define CAR_NODE_HOLD_OFF_MILLIS 3000
+  #endif
+  {
+    static unsigned long carnode_btn_down_at = 0;
+    if (user_btn.isPressed()) {
+      if (carnode_btn_down_at == 0) {
+        carnode_btn_down_at = millis();
+      } else if ((unsigned long)(millis() - carnode_btn_down_at) >= CAR_NODE_HOLD_OFF_MILLIS) {
+        Serial.println("CarNode: hibernating (button held)...");
+      #if defined(DISPLAY_CLASS) && !defined(DUALMODE)
+        if (display.isOn()) {
+          display.startFrame();
+          display.setCursor(0, 0);
+          display.print("Hibernating...");
+          display.endFrame();
+        }
+      #endif
+        board.hibernateButtonWake(PIN_USER_BTN);   // wake on button only; does not return
+      }
+    } else {
+      carnode_btn_down_at = 0;
+    }
   }
 #endif
 

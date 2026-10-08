@@ -38,6 +38,10 @@
 #include "RateLimiter.h"
 #include "ChannelBlocker.h"
 
+#ifdef WITH_MT_BEACON
+#include "MtBeaconControl.h"   // -I examples/meshtastic_beacon
+#endif
+
 #ifdef WITH_BRIDGE
 extern AbstractBridge* bridge;
 #endif
@@ -72,7 +76,11 @@ struct NeighbourInfo {
 #endif
 
 #ifndef FIRMWARE_VERSION
-  #define FIRMWARE_VERSION   "v1.18.0"
+  #ifdef WITH_MT_BEACON
+    #define FIRMWARE_VERSION   "v1.18.0+mtbeacon-0.2.7"
+  #else
+    #define FIRMWARE_VERSION   "v1.18.0"
+  #endif
 #endif
 
 #define FIRMWARE_ROLE "repeater"
@@ -89,6 +97,9 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
   ClientACL  acl;
   CommonCLI _cli;
   ChannelBlocker _blocker;   // #channels this repeater is configured not to repeat
+#ifdef WITH_MT_BEACON
+  MtBeaconControl _beacon;
+#endif
   uint8_t reply_data[MAX_PACKET_PAYLOAD];
   uint8_t reply_path[MAX_PATH_SIZE];
   uint8_t reply_path_len;
@@ -192,6 +203,9 @@ public:
   bool isHiddenNode() const {
     return _prefs.advert_interval == 0 && _prefs.flood_advert_interval == 0;
   }
+#ifdef WITH_MT_BEACON
+  MtBeaconControl* getBeacon() { return &_beacon; }
+#endif
 
   void savePrefs() override {
     _cli.savePrefs(_fs);

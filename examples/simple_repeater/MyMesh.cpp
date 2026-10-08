@@ -2,6 +2,10 @@
 #include <algorithm>
 #include <helpers/TimeSanity.h>
 
+#ifdef WITH_MT_BEACON
+extern RADIO_CLASS radio;   // concrete RadioLib radio (defined in the variant target.cpp)
+#endif
+
 /* ------------------------------ Config -------------------------------- */
 
 #ifndef LORA_FREQ
@@ -973,6 +977,16 @@ void MyMesh::begin(FILESYSTEM *fs) {
   _cli.loadPrefs(_fs);
   acl.load(_fs, self_id);
   _blocker.begin(_fs);
+
+#ifdef WITH_MT_BEACON
+  // Derive a stable Meshtastic node number + starting packet id from our pubkey.
+  {
+    const uint8_t* pk = self_id.pub_key;
+    uint32_t node = ((uint32_t)pk[0] << 24) | ((uint32_t)pk[1] << 16) | ((uint32_t)pk[2] << 8) | pk[3];
+    uint32_t seed = ((uint32_t)pk[4] << 24) | ((uint32_t)pk[5] << 16) | ((uint32_t)pk[6] << 8) | pk[7];
+    _beacon.begin(_fs, node, seed);
+  }
+#endif
   // TODO: key_store.begin();
   region_map.load(_fs);
 
@@ -1060,6 +1074,9 @@ void MyMesh::sendSelfAdvertisement(int delay_millis, bool flood) {
   if (pkt) {
     if (flood) {
       sendFloodScoped(default_scope, pkt, delay_millis, _prefs.path_hash_mode + 1);
+#ifdef WITH_MT_BEACON
+      _beacon.onFloodAdvert();  // an explicit flood advert (CLI 'advert') also carries the text
+#endif
     } else {
       sendZeroHop(pkt, delay_millis);
     }
@@ -1308,6 +1325,10 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
     }
   } else if (_blocker.handleCommand(command, reply, _fs)) {
     // handled by the channel blocklist ("block ..." / "unblock ..." verbs)
+#ifdef WITH_MT_BEACON
+  } else if (_beacon.handleCommand(command, reply, _fs)) {
+    // handled by the Meshtastic beacon ("mtbeacon ..." verbs)
+#endif
   } else{
     _cli.handleCommand(sender_timestamp, command, reply);  // common CLI commands
   }
@@ -1327,6 +1348,9 @@ void MyMesh::loop() {
 
     updateFloodAdvertTimer(); // schedule next flood advert
     updateAdvertTimer();      // also schedule local advert (so they don't overlap)
+#ifdef WITH_MT_BEACON
+    _beacon.onFloodAdvert();  // Meshtastic chat text rides a burst shortly after
+#endif
   } else if (next_local_advert && millisHasNowPassed(next_local_advert)) {
     mesh::Packet *pkt = createSelfAdvert();
     if (pkt) sendZeroHop(pkt);
@@ -1351,6 +1375,32 @@ void MyMesh::loop() {
     acl.save(_fs);
     dirty_contacts_expiry = 0;
   }
+
+#ifdef WITH_MT_BEACON
+  // Time-slice a Meshtastic beacon onto the air when the mesh is idle. Restores
+  // the repeater's current radio params (incl. any temp override) afterwards.
+  {
+    // isInRecvMode() is false while a MeshCore transmit is in flight (the packet
+    // has already been dequeued, so hasPendingWork() no longer sees it). Without
+    // this the beacon could retune the radio mid-transmit, aborting the send and
+    // leaving the radio in a state where the next CAD never completes.
+    bool busy = hasPendingWork() || radio_driver.isReceiving()
+             || !radio_driver.isInRecvMode();
+    MtBeaconControl::Context ctx;
+    ctx.node_name = _prefs.node_name;
+    ctx.lat = _prefs.node_lat;
+    ctx.lon = _prefs.node_lon;
+    ctx.epoch = getRTCClock()->getCurrentTime();
+    ctx.flood_advert_hours = _prefs.flood_advert_interval;   // paces the chat text
+    ctx.batt_millivolts = board.getBattMilliVolts();         // Telemetry: battery
+    ctx.uptime_secs = (uint32_t)(uptime_millis / 1000);      // Telemetry: uptime
+    ctx.home_freq = _prefs.freq; ctx.home_bw = _prefs.bw;
+    ctx.home_sf = _prefs.sf;     ctx.home_cr = _prefs.cr;
+    ctx.home_sync = MESHCORE_SYNC_WORD;
+    ctx.home_tx_power = _prefs.tx_power_dbm;
+    _beacon.tick(radio_driver, radio, busy, ctx);
+  }
+#endif
 
   // update uptime
   uint32_t now = millis();

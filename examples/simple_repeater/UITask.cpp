@@ -2,6 +2,9 @@
 #include "target.h"
 #include <Arduino.h>
 #include <helpers/CommonCLI.h>
+#ifdef WITH_MT_BEACON
+#include "MtBeaconControl.h"   // -I examples/meshtastic_beacon
+#endif
 
 #ifndef USER_BTN_PRESSED
 #define USER_BTN_PRESSED LOW
@@ -72,7 +75,11 @@ void UITask::renderCurrScreen() {
     _display->drawTextCentered(_display->width() / 2, 35, _version_info);
 
     // node type
+#if defined(WITH_MT_BEACON)
+    const char* node_type = "< Repeater +Beacon >";
+#else
     const char* node_type = "< Repeater >";
+#endif
     _display->drawTextCentered(_display->width() / 2, 48, node_type);
   } else if (_powering_off_at > 0) {
     // meshcore logo
@@ -106,6 +113,17 @@ void UITask::renderCurrScreen() {
     _display->setCursor(0, 30);
     sprintf(tmp, "BW: %03.2f CR: %d", _node_prefs->bw, _node_prefs->cr);
     _display->print(tmp);
+
+#ifdef WITH_MT_BEACON
+    // live Meshtastic beacon status (warning color when off)
+    if (_beacon) {
+      char b[40];
+      _beacon->uiLine(b, sizeof(b));
+      _display->setCursor(0, 40);
+      _display->setColor(_beacon->enabled() ? UIColor::primary_txt : UIColor::warning_txt);
+      _display->print(b);
+    }
+#endif
   }
 }
 

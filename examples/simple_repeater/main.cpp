@@ -3,7 +3,7 @@
 #include <Mesh.h>
 
 #include "MyMesh.h"
-#include "LoopDiag.h"
+#include <helpers/LoopDiag.h>
 
 #if defined(DISPLAY_CLASS) && !defined(DUALMODE)
   #include "UITask.h"

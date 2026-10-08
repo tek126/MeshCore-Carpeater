@@ -1,16 +1,18 @@
 #pragma once
 #include <stdint.h>
 
-// ESP32 loop-hang diagnostics: a 60 s task watchdog on the loop task (a wedged
-// loop reboots itself instead of needing a power cycle) plus a phase breadcrumb
-// kept in RTC-noinit memory, so after a watchdog rescue the 'diag' CLI command
-// can say which part of the loop was stuck. nRF52 boards already have a 90 s
-// hardware watchdog (see main.cpp); the macros compile out there.
-// Ported from the companion's LoopDiag (companion-presence 252944e7).
+// ESP32 loop-hang diagnostics, shared by simple_repeater and companion_radio
+// (one copy, so a dual-mode build links): a 60 s task watchdog on the loop task
+// (a wedged loop reboots itself instead of needing a power cycle) plus a phase
+// breadcrumb kept in RTC-noinit memory, so after a watchdog rescue the repeater's
+// 'diag' command / the companion's 'sys.diag' custom var can say which part of
+// the loop was stuck. nRF52 boards have a 90 s hardware watchdog instead; the
+// macros compile out there.
 #if defined(ESP32)
 namespace loop_diag {
   enum Phase : uint8_t { IDLE = 0, CLI, BUTTON, MESH, ADVERT, BEACON, READVERT,
-                         SENSORS, UI, CLOCK, SLEEP, HIBERNATE, ACLSAVE };
+                         SENSORS, UI, CLOCK, SLEEP, HIBERNATE, ACLSAVE,
+                         PRESENCE, INTERFACES };   // last two: companion only
   void begin();              // classify the reset + arm the watchdog (end of setup)
   void mark(Phase p);        // record the part of the loop about to run (cheap store)
   void feed();               // pet the watchdog, once per healthy loop pass

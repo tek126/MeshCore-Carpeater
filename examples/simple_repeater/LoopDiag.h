@@ -10,7 +10,7 @@
 #if defined(ESP32)
 namespace loop_diag {
   enum Phase : uint8_t { IDLE = 0, CLI, BUTTON, MESH, ADVERT, BEACON, READVERT,
-                         SENSORS, UI, CLOCK, SLEEP, HIBERNATE };
+                         SENSORS, UI, CLOCK, SLEEP, HIBERNATE, ACLSAVE };
   void begin();              // classify the reset + arm the watchdog (end of setup)
   void mark(Phase p);        // record the part of the loop about to run (cheap store)
   void feed();               // pet the watchdog, once per healthy loop pass

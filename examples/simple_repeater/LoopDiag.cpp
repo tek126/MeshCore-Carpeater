@@ -31,6 +31,7 @@ static const char* phase_name(uint8_t p) {
     case loop_diag::CLOCK:    return "clk";
     case loop_diag::SLEEP:    return "sleep";
     case loop_diag::HIBERNATE: return "hib";
+    case loop_diag::ACLSAVE:  return "aclsave";
   }
   return "unk";
 }

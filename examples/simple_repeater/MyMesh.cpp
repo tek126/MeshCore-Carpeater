@@ -100,6 +100,18 @@ void MyMesh::putNeighbour(const mesh::Identity &id, uint32_t timestamp, float sn
 // timed login, request and CLI command after that looks like a replay -- for
 // good, because the ACL is persisted. Treat an implausible stored value as "no
 // history", and refuse to accept (and so store) an implausible new one.
+// TEMPORARY field diagnostic: one serial line per login / request / CLI command
+// saying what the repeater decided and why (never the password). Remove once
+// the V4 login failure is understood.
+#ifndef AUTH_TRACE
+  #define AUTH_TRACE 1
+#endif
+#if AUTH_TRACE
+  #define AUTH_LOG(...) Serial.printf(__VA_ARGS__)
+#else
+  #define AUTH_LOG(...)
+#endif
+
 static bool replayGuardAccepts(ClientInfo* client, uint32_t sender_timestamp) {
   if (!time_sanity::plausible(sender_timestamp)) return false;
   if (!time_sanity::plausible(client->last_timestamp)) client->last_timestamp = 0;
@@ -108,8 +120,13 @@ static bool replayGuardAccepts(ClientInfo* client, uint32_t sender_timestamp) {
 
 uint8_t MyMesh::handleLoginReq(const mesh::Identity& sender, const uint8_t* secret, uint32_t sender_timestamp, const uint8_t* data, bool is_flood) {
   ClientInfo* client = NULL;
+  AUTH_LOG("auth: login from %02x%02x%02x%02x %s, ts=%lu now=%lu flood=%d\n",
+           sender.pub_key[0], sender.pub_key[1], sender.pub_key[2], sender.pub_key[3],
+           data[0] == 0 ? "blank-pw" : "with-pw", (unsigned long)sender_timestamp,
+           (unsigned long)getRTCClock()->getCurrentTime(), (int)is_flood);
   if (data[0] == 0) {   // blank password, just check if sender is in ACL
     client = acl.getClient(sender.pub_key, PUB_KEY_SIZE);
+    if (client) AUTH_LOG("auth:   in ACL, perms=%02x -> ok\n", (unsigned)client->permissions);
     if (client == NULL) {
     #if MESH_DEBUG
       MESH_DEBUG_PRINTLN("Login, sender not in ACL");
@@ -126,16 +143,22 @@ uint8_t MyMesh::handleLoginReq(const mesh::Identity& sender, const uint8_t* secr
 #if MESH_DEBUG
       MESH_DEBUG_PRINTLN("Invalid password: %s", data);
 #endif
+      AUTH_LOG("auth:   password matches neither admin nor guest -> rejected\n");
       return 0;
     }
 
     client = acl.putClient(sender, 0);  // add to contacts (if not already known)
+    AUTH_LOG("auth:   %s password, stored ts=%lu\n", perms == PERM_ACL_ADMIN ? "admin" : "guest",
+             (unsigned long)client->last_timestamp);
     if (!replayGuardAccepts(client, sender_timestamp) || sender_timestamp <= client->last_timestamp) {
       MESH_DEBUG_PRINTLN("Possible login replay attack!");
+      AUTH_LOG("auth:   timestamp check failed (ts=%lu stored=%lu) -> rejected\n",
+               (unsigned long)sender_timestamp, (unsigned long)client->last_timestamp);
       return 0;  // FATAL: client table is full -OR- replay attack
     }
 
     MESH_DEBUG_PRINTLN("Login success!");
+    AUTH_LOG("auth:   -> ok\n");
     client->last_timestamp = sender_timestamp;
     client->last_activity = getRTCClock()->getCurrentTime();
     client->permissions &= ~0x03;
@@ -701,6 +724,9 @@ void MyMesh::onPeerDataRecv(mesh::Packet *packet, uint8_t type, int sender_idx, 
   if (type == PAYLOAD_TYPE_REQ) { // request (from a Known admin client!)
     uint32_t timestamp;
     memcpy(&timestamp, data, 4);
+    AUTH_LOG("auth: request type %u from %02x%02x%02x%02x ts=%lu stored=%lu\n", (unsigned)data[4],
+             client->id.pub_key[0], client->id.pub_key[1], client->id.pub_key[2], client->id.pub_key[3],
+             (unsigned long)timestamp, (unsigned long)client->last_timestamp);
 
     if (replayGuardAccepts(client, timestamp) && timestamp > client->last_timestamp) { // prevent replay attacks
       int reply_len = handleRequest(client, timestamp, &data[4], len - 4);
@@ -727,11 +753,15 @@ void MyMesh::onPeerDataRecv(mesh::Packet *packet, uint8_t type, int sender_idx, 
       }
     } else {
       MESH_DEBUG_PRINTLN("onPeerDataRecv: possible replay attack detected");
+      AUTH_LOG("auth:   timestamp check failed -> dropped\n");
     }
   } else if (type == PAYLOAD_TYPE_TXT_MSG && len > 5 && client->isAdmin()) { // a CLI command
     uint32_t sender_timestamp;
     memcpy(&sender_timestamp, data, 4); // timestamp (by sender's RTC clock - which could be wrong)
     uint8_t flags = (data[4] >> 2);        // message attempt number, and other flags
+    AUTH_LOG("auth: CLI from %02x%02x%02x%02x flags=%u ts=%lu stored=%lu\n",
+             client->id.pub_key[0], client->id.pub_key[1], client->id.pub_key[2], client->id.pub_key[3],
+             (unsigned)flags, (unsigned long)sender_timestamp, (unsigned long)client->last_timestamp);
 
     if (!(flags == TXT_TYPE_PLAIN || flags == TXT_TYPE_CLI_DATA || flags == TXT_TYPE_CLI_COMMAND)) {
       MESH_DEBUG_PRINTLN("onPeerDataRecv: unsupported text type received: flags=%02x", (uint32_t)flags);
@@ -789,7 +819,12 @@ void MyMesh::onPeerDataRecv(mesh::Packet *packet, uint8_t type, int sender_idx, 
       }
     } else {
       MESH_DEBUG_PRINTLN("onPeerDataRecv: possible replay attack detected");
+      AUTH_LOG("auth:   timestamp check failed -> dropped\n");
     }
+  } else if (type == PAYLOAD_TYPE_TXT_MSG) {
+    AUTH_LOG("auth: text from %02x%02x%02x%02x ignored (perms=%02x, not admin)\n",
+             client->id.pub_key[0], client->id.pub_key[1], client->id.pub_key[2], client->id.pub_key[3],
+             (unsigned)client->permissions);
   }
 }
 
@@ -1433,7 +1468,10 @@ void MyMesh::loop() {
 
   // is pending dirty contacts write needed?
   if (dirty_contacts_expiry && millisHasNowPassed(dirty_contacts_expiry)) {
+    LOOP_DIAG_MARK(ACLSAVE);
+    AUTH_LOG("auth: saving ACL...\n");
     acl.save(_fs);
+    AUTH_LOG("auth: ACL saved\n");
     dirty_contacts_expiry = 0;
   }
 

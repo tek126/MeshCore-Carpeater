@@ -7,6 +7,12 @@
   #define MAX_INTERFACES 4
 #endif
 
+// Some board libraries (e.g. Heltec Mesh Solar's meshsolar logger.h) #define
+// NONE as a log level, which breaks InterfaceType::NONE; hide it for this
+// header only and restore it at the end.
+#pragma push_macro("NONE")
+#undef NONE
+
 enum class InterfaceType : uint8_t {
   NONE,
   Bluetooth,
@@ -198,3 +204,5 @@ public:
   }
 
 };
+
+#pragma pop_macro("NONE")

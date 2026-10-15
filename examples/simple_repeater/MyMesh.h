@@ -85,7 +85,7 @@ struct NeighbourInfo {
 // still reports something truthful.
 #ifndef FIRMWARE_VERSION
   #ifdef WITH_MT_BEACON
-    #define FIRMWARE_VERSION   "v1.18.0+mtbeacon-0.2.7"
+    #define FIRMWARE_VERSION   "v1.18.0+mtbeacon-0.3.0"
   #elif defined(WITH_CAR_NODE)
     #define FIRMWARE_VERSION   "v1.18.0+carnode-0.2.9"
   #else

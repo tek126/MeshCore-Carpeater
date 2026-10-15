@@ -4,6 +4,7 @@
 #include <esp_task_wdt.h>
 #include <esp_attr.h>
 #include <esp_system.h>
+#include <esp_idf_version.h>
 
 // RTC-noinit survives every reset except full power removal, which is exactly
 // the lifetime we want: the phase written just before a watchdog reset is still
@@ -69,7 +70,14 @@ void loop_diag::begin() {
     diag_rescues++;
   }
   Serial.printf("loop_diag: %s\n", summary());
+#if ESP_IDF_VERSION_MAJOR >= 5
+  // IDF 5 (e.g. ESP32-C6 on pioarduino): config-struct API, and the core has
+  // usually initialised the TWDT already, so reconfigure it in place
+  esp_task_wdt_config_t cfg = { .timeout_ms = 60000, .idle_core_mask = 0, .trigger_panic = true };
+  if (esp_task_wdt_reconfigure(&cfg) != ESP_OK) esp_task_wdt_init(&cfg);
+#else
   esp_task_wdt_init(60, true);   // panic (-> reboot) if the loop stalls 60 s
+#endif
   esp_task_wdt_add(NULL);        // watch the task running setup()/loop()
 }
 

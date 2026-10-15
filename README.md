@@ -1,128 +1,111 @@
-## About MeshCore
+# MeshCore Carpeater
 
-MeshCore is a lightweight, portable C++ library that enables multi-hop packet routing for embedded projects using LoRa and other packet radios. It is designed for developers who want to create resilient, decentralized communication networks that work without the internet.
+A fork of [MeshCore](https://github.com/meshcore-dev/MeshCore) that turns a
+repeater into a **mobile, in-vehicle node that reports where it parks** — a
+*car repeater*. When the vehicle stops moving for a few minutes, it pushes its
+live GPS location to *both* networks at once — a **Meshtastic beacon** and a
+fresh **MeshCore advert** — so the node shows up where you actually left it,
+on both maps.
 
-## 🔍 What is MeshCore?
+> The car node lives in [`examples/car_node/`](examples/car_node/) — the
+> [**full documentation is there**](examples/car_node/README.md).
+> Prebuilt firmware + flashing instructions:
+> [**alexdowney.net/carnode**](https://alexdowney.net/carnode/).
 
-MeshCore now supports a range of LoRa devices, allowing for easy flashing without the need to compile firmware manually. Users can flash a pre-built binary using tools like Adafruit ESPTool and interact with the network through a serial console.
-MeshCore provides the ability to create wireless mesh networks, similar to Meshtastic and Reticulum but with a focus on lightweight multi-hop packet routing for embedded projects. Unlike Meshtastic, which is tailored for casual LoRa communication, or Reticulum, which offers advanced networking, MeshCore balances simplicity with scalability, making it ideal for custom embedded solutions, where devices (nodes) can communicate over long distances by relaying messages through intermediate nodes. This is especially useful in off-grid, emergency, or tactical situations where traditional communication infrastructure is unavailable.
+> **Base: MeshCore v1.18.0.** Since 1.18 the
+> [mtbeacon](https://github.com/tek126/MeshCore-mtbeacon),
+> [Carpeater](https://github.com/tek126/MeshCore-Carpeater) and
+> [Dual-Node](https://github.com/tek126/MeshCore-dualmode) repos carry the same
+> source tree, so the shared fixes (clock sanity, repeater-login replay-guard
+> recovery, loop watchdogs) land everywhere at once. Each README covers its own part.
 
-## ⚡ Key Features
+## What it does
 
-* Multi-Hop Packet Routing
-  * Devices can forward messages across multiple nodes, extending range beyond a single radio's reach.
-  * Supports up to a configurable number of hops to balance network efficiency and prevent excessive traffic.
-  * Nodes use fixed roles where "Companion" nodes are not repeating messages at all to prevent adverse routing paths from being used.
-* Supports LoRa Radios – Works with Heltec, RAK Wireless, and other LoRa-based hardware.
-* Decentralized & Resilient – No central server or internet required; the network is self-healing.
-* Low Power Consumption – Ideal for battery-powered or solar-powered devices.
-* Simple to Deploy – Pre-built example applications make it easy to get started.
+- **Park-triggered** — while driving it sends no location, only a light
+  presence. Once the GPS fix sits still past `park` seconds (default 5 min),
+  one unified update fires on both networks with the same fix.
+- **Jitter-proof** — the park logic uses the median of the last ~9 fixes and
+  a movement-confirm window, so trunk-mounted GPS multipath can't fake a drive
+  or misplace the pin.
+- **Repeat sleep** — parked past `sleep` hours (default 20), the node stops
+  repeating until it drives again; a car parked overnight isn't a useful
+  mobile repeater.
+- **Quiet zones** — `carnode zone add <name>` stores a place the vehicle parks
+  often (up to 4: home, work, …). Parking in one turns repeat off immediately
+  and suppresses every broadcast, so that location never goes on the air.
+- **Channel block list** — `block #<channel>` tells the repeater not to
+  rebroadcast a MeshCore channel (the hash is derived from the name alone), so
+  a noisy channel can be kept off your local airtime.
+- **Battery on the map** — each burst carries Meshtastic telemetry, so a car
+  parked for days shows its charge draining in any Meshtastic client.
+- **Self-recovering** — the radio re-initialises itself after a run of
+  transmits the chip reports as dead, and `mtbeacon stats` shows the running
+  transmit health. nRF52 boards also arm a hardware watchdog (a hung node
+  reboots itself) and answer `get pwrmgt.bootreason` with why they last reset.
 
-## 🎯 What Can You Use MeshCore For?
+Everything is runtime-configurable over serial or an admin remote-CLI session
+via two verbs: `mtbeacon` (the Meshtastic beacon's RF + appearance, including
+region, modem preset, and an explicit frequency slot) and `carnode` (park
+behaviour). See the
+[command reference](examples/car_node/README.md#runtime-control).
 
-* Off-Grid Communication: Stay connected even in remote areas.
-* Emergency Response & Disaster Recovery: Set up instant networks where infrastructure is down.
-* Outdoor Activities: Hiking, camping, and adventure racing communication.
-* Tactical & Security Applications: Military, law enforcement, and private security use cases.
-* IoT & Sensor Networks: Collect data from remote sensors and relay it back to a central location.
+## Supported boards
 
-## 🚀 How to Get Started
+| Board | Radio | GPS | Env |
+| --- | --- | --- | --- |
+| Heltec V4 | ESP32-S3 · SX1262 | external NMEA module | `heltec_v4_carnode` |
+| Heltec T114 | nRF52840 · SX1262 | external NMEA module | `Heltec_t114_carnode` |
+| Seeed T1000-E | nRF52840 · LR1110 | onboard | `t1000e_dualmode_carnode` |
 
-- Watch the [MeshCore QuickStart Playlist](https://www.youtube.com/watch?v=iaFltojJrAc&list=PLshzThxhw4O4WU_iZo3NmNZOv6KMrUuF9) by The Comms Channel
-- Watch the [MeshCore Technical Presentation](https://www.youtube.com/watch?v=OwmkVkZQTf4) by Liam Cottle.
-- Read through our [Frequently Asked Questions](./docs/faq.md) and [Documentation](https://docs.meshcore.io).
-- Flash the MeshCore firmware on a supported device.
-- Connect with a supported client.
+The T1000-E build is [dual-mode](examples/dualmode/): a 5× button press
+switches between the car node (repeater mode) and a normal phone-paired
+companion node. Dual-mode combos that pair the car node with a
+Meshtastic-presence companion — for the T1000-E, Heltec V4, and Heltec
+T114 — live in [**MeshCore-dualmode**](https://github.com/tek126/MeshCore-dualmode).
 
-For developers:
-
-- Install [PlatformIO](https://docs.platformio.org) in [Visual Studio Code](https://code.visualstudio.com).
-- Clone and open the MeshCore repository in Visual Studio Code.
-- See the example applications you can modify and run:
-  - [Companion Radio](./examples/companion_radio) - For use with an external chat app, over BLE, USB or Wi-Fi.
-  - [KISS Modem](./examples/kiss_modem) - Serial KISS protocol bridge for host applications. ([protocol docs](./docs/kiss_modem_protocol.md))
-  - [Simple Repeater](./examples/simple_repeater) - Extends network coverage by relaying messages.
-  - [Simple Room Server](./examples/simple_room_server) - A simple BBS server for shared Posts.
-  - [Simple Secure Chat](./examples/simple_secure_chat) - Secure terminal based text communication between devices.
-  - [Simple Sensor](./examples/simple_sensor) - Remote sensor node with telemetry and alerting.
-
-The Simple Secure Chat example can be interacted with through the Serial Monitor in Visual Studio Code, or with a Serial USB Terminal on Android.
-
-## ⚡️ MeshCore Flasher
-
-We have prebuilt firmware ready to flash on supported devices.
-
-- Launch https://meshcore.io/flasher
-- Select a supported device
-- Flash one of the firmware types:
-  - Companion, Repeater or Room Server
-- Once flashing is complete, you can connect with one of the MeshCore clients below.
-
-## 📱 MeshCore Clients
-
-**Companion Firmware**
-
-The companion firmware can be connected to via BLE, USB or Wi-Fi depending on the firmware type you flashed.
-
-- Web: https://app.meshcore.nz
-- Android: https://play.google.com/store/apps/details?id=com.liamcottle.meshcore.android
-- iOS: https://apps.apple.com/us/app/meshcore/id6742354151?platform=iphone
-- NodeJS: https://github.com/liamcottle/meshcore.js
-- Python: https://github.com/fdlamotte/meshcore-cli
-
-**Repeater and Room Server Firmware**
-
-The repeater and room server firmware can be set up via USB in the web config tool.
-
-- https://config.meshcore.io
-
-They can also be managed via LoRa in the mobile app by using the Remote Management feature.
-
-## 🛠 Hardware Compatibility
-
-MeshCore is designed for devices listed in the [MeshCore Flasher](https://meshcore.io/flasher)
-
-## 📜 License
-
-MeshCore is open-source software released under the MIT License. You are free to use, modify, and distribute it for personal and commercial projects.
-
-## Contributing
-
-Please submit PR's using 'dev' as the base branch!
-For minor changes just submit your PR and we'll try to review it, but for anything more 'impactful' please open an Issue first and start a discussion. It is better to sound out what it is you want to achieve first, and try to come to a consensus on what the best approach is, especially when it impacts the structure or architecture of this codebase.
-
-Here are some general principles you should try to adhere to:
-* Keep it simple. Please, don't think like a high-level lang programmer. Think embedded, and keep code concise, without any unnecessary layers.
-* No dynamic memory allocation, except during setup/begin functions.
-* Use the same brace and indenting style that's in the core source modules. (A .clang-format is probably going to be added soon, but please do NOT retroactively re-format existing code. This just creates unnecessary diffs that make finding problems harder)
-
-Help us prioritize! Please react with thumbs-up to issues/PRs you care about most. We look at reaction counts when planning work.
-
-### Running unit tests
-
-To run unit tests, run the following command:
-
-```bash
-pio test --environment native --verbose
+```
+pio run -e heltec_v4_carnode
+pio run -e Heltec_t114_carnode
+pio run -e t1000e_dualmode_carnode
 ```
 
-## Road-Map / To-Do
+Adding a board is a small platformio.ini env on top of its `*_repeater` env —
+see [the build docs](examples/car_node/README.md#building).
 
-There are a number of fairly major features in the pipeline, with no particular time-frames attached yet. In very rough chronological order:
-- [X] Companion radio: UI redesign
-- [X] Repeater + Room Server: add ACL's (like Sensor Node has)
-- [X] Standardise Bridge mode for repeaters
-- [ ] Repeater/Bridge: Standardise the Transport Codes for zoning/filtering
-- [X] Core + Repeater: enhanced zero-hop neighbour discovery
-- [ ] Core: round-trip manual path support
-- [ ] Companion + Apps: support for multiple sub-meshes (and 'off-grid' client repeat mode)
-- [ ] Core + Apps: support for LZW message compression
-- [ ] Core: dynamic CR (Coding Rate) for weak vs strong hops
-- [ ] Core: new framework for hosting multiple virtual nodes on one physical device
-- [ ] V2 protocol spec: discussion and consensus around V2 packet protocol, including path hashes, new encryption specs, etc
+## Related repos
 
-## 📞 Get Support
+The car node is built on the [`meshtastic_beacon`](examples/meshtastic_beacon/)
+add-on and reuses its on-air-verified Meshtastic interop math unchanged; the
+static fixed-interval beacon is replaced with the park-triggered, GPS-driven
+one.
 
-- Report bugs and request features on the [GitHub Issues](https://github.com/meshcore-dev/meshcore/issues) page.
-- Find additional guides and components on [my site](https://buymeacoffee.com/ripplebiz).
-- Join [MeshCore Discord](https://meshcore.gg) to chat with the developers and get help from the community.
+- [**MeshCore-mtbeacon**](https://github.com/tek126/MeshCore-mtbeacon) — the
+  beacon add-on itself: the fixed-repeater beacon fleet and the companion-side
+  Meshtastic presence.
+- [**MeshCore-dualmode**](https://github.com/tek126/MeshCore-dualmode) —
+  Dual-Node: one firmware that is both this car node and a
+  Meshtastic-presence companion, switched by a 5× button press.
+- [**MeshCore**](https://github.com/meshcore-dev/MeshCore) — the upstream
+  project this is based on (v1.18.0).
+
+## Scope / etiquette
+
+One-way presence only: the node appears on Meshtastic as a named node + map
+pin (+ optional chat text) but does **not** route or rebroadcast Meshtastic
+traffic. A park floods a MeshCore advert mesh-wide and adds airtime to a
+shared public Meshtastic channel — keep `park` reasonable, respect your
+region's limits, and don't beacon onto channels you don't operate.
+
+## License
+
+MIT, same as upstream MeshCore (see [`license.txt`](license.txt)). MeshCore
+Carpeater is an independent project and is not affiliated with or endorsed by
+the MeshCore or Meshtastic projects. Meshtastic® is a registered trademark of
+Meshtastic LLC.
+
+## Built with generative AI
+
+The car node, the underlying beacon add-on, and this fork's docs were
+developed with the assistance of generative AI (Anthropic's Claude), then
+reviewed and tested by a human. Read the source, verify behavior, and test
+before relying on it.
